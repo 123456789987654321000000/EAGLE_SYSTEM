@@ -53,7 +53,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onBeforeUnmount, ref } from 'vue'
 
 declare global {
   interface Window {
@@ -68,6 +68,11 @@ const loading = ref(true)
 const error = ref('')
 const userList = ref<any[]>([])
 const selectedUser = ref<string>('')
+
+// 轨迹回放专用
+const playMarker = ref<any>(null) // 动态移动点
+const playTimer = ref<any>(null)
+const playSpeed = ref(800) // 移动速度（毫秒）
 
 // 默认日期：今天
 const today = new Date()
@@ -127,6 +132,7 @@ const fetchLatestLocations = async (date?: string) => {
     console.log('最新人员数据：', data)
 
     clearOverlays()
+
     if (!data || data.length === 0) {
       userList.value = []
       return
@@ -178,7 +184,7 @@ const filterUsers = async () => {
   await fetchLatestLocations(selectedDate.value || undefined)
 }
 
-// 查看用户【当日】轨迹
+// 查看用户轨迹：绘制路线 + 动态点回放
 const showUserHistory = async (usercode: string) => {
   try {
     selectedUser.value = usercode
@@ -196,29 +202,54 @@ const showUserHistory = async (usercode: string) => {
       return
     }
 
-    // 绘制轨迹线
-    const path = data.map((item: any) => new window.qq.maps.LatLng(item.latitude, item.longitude))
+    // 按时间排序
+    const sortedPath = data.sort((a: any, b: any) =>
+      new Date(a.createTime).getTime() - new Date(b.createTime).getTime()
+    )
+
+    // 生成轨迹路线坐标
+    const path = sortedPath.map((item: any) =>
+      new window.qq.maps.LatLng(item.latitude, item.longitude)
+    )
+
+    // 绘制蓝色轨迹线
     const line = new window.qq.maps.Polyline({
       map: map.value,
       path,
       strokeColor: '#409EFF',
-      strokeWeight: 4,
-      strokeOpacity: 0.8
+      strokeWeight: 5,
+      strokeOpacity: 0.9
     })
     polylines.value.push(line)
 
-    // 绘制轨迹点
-    data.forEach((item: any, index: number) => {
-      const pos = new window.qq.maps.LatLng(item.latitude, item.longitude)
-      const marker = new window.qq.maps.Marker({
-        position: pos,
-        map: map.value,
-        title: `点 ${index + 1}`
-      })
-      markers.value.push(marker)
+    // 创建动态蓝色回放点
+    const firstPos = path[0]
+    playMarker.value = new window.qq.maps.Marker({
+      position: firstPos,
+      map: map.value,
+      icon: new window.qq.maps.MarkerImage(
+        'src/assets/images/avatar/avatar7.webp',
+        new window.qq.maps.Size(18, 18),
+        null,
+        null,
+        new window.qq.maps.Size(18, 18)
+      ),
+      zIndex: 999
     })
 
-    // 聚焦轨迹
+    // 自定义蓝色圆点样式
+    const markerDom = playMarker.value.Qa
+    if (markerDom) {
+      markerDom.style.backgroundColor = '#409EFF'
+      markerDom.style.borderRadius = '50%'
+      markerDom.style.border = '3px solid white'
+      markerDom.style.boxShadow = '0 0 5px rgba(0,0,0,0.3)'
+    }
+
+    // 自动回放
+    startPlay(path)
+
+    // 视野自适应
     const bounds = new window.qq.maps.LatLngBounds()
     path.forEach((p: any) => bounds.extend(p))
     map.value.fitBounds(bounds)
@@ -230,11 +261,33 @@ const showUserHistory = async (usercode: string) => {
   }
 }
 
-// 清理地图覆盖物
+// 开始自动回放
+const startPlay = (path: any[]) => {
+  let index = 0
+  const len = path.length
+
+  const run = () => {
+    if (index >= len) {
+      index = 0 // 循环
+    }
+    playMarker.value.setPosition(path[index])
+    index++
+  }
+
+  playTimer.value = setInterval(run, playSpeed.value)
+}
+
+// 清理
 const clearOverlays = () => {
+  if (playTimer.value) clearInterval(playTimer.value)
+  if (playMarker.value) {
+    playMarker.value.setMap(null)
+    playMarker.value = null
+  }
+
   if (map.value) {
-    markers.value.forEach((m) => m.setMap(null))
-    polylines.value.forEach((p) => p.setMap(null))
+    markers.value.forEach(m => m.setMap(null))
+    polylines.value.forEach(p => p.setMap(null))
   }
   markers.value = []
   polylines.value = []
@@ -244,7 +297,7 @@ onMounted(() => {
   initMap()
 })
 
-onUnmounted(() => {
+onBeforeUnmount(() => {
   clearOverlays()
   map.value = null
 })
