@@ -1,101 +1,121 @@
-<!-- 人员轨迹地图组件
-  功能：展示人员实时定位 + 历史轨迹播放 + 人员列表筛选
-  技术：QQ地图 + Vue3 + Element Plus
--->
 <template>
   <div class="user-map-container">
-    <!-- 左侧地图展示区域 -->
+    <!-- 左侧：地图展示区域 -->
     <div class="map-content">
-      <!-- 地图DOM容器 -->
       <div id="map-container" class="map-container"></div>
-      <!-- 地图加载中提示 -->
       <div v-if="loading" class="loading">地图加载中...</div>
-      <!-- 异常错误提示 -->
       <div v-if="error" class="error">{{ error }}</div>
     </div>
 
-    <!-- 右侧人员列表面板 -->
+    <!-- 右侧：人员列表 / 详情面板 -->
     <div class="user-list">
-      <!-- 面板顶部固定区域：标题 + 搜索筛选 -->
-      <div class="user-list-fixed">
-        <!-- 标题栏 + 返回主页按钮 -->
-        <div class="title-row">
-          <h3 class="user-list-title">人员列表</h3>
-          <img
-            src="@/assets/images/icon/Home.png"
-            class="home-img-btn"
-            @click="goToHomePage"
-            title="返回主页"
+      <!-- 列表模式：默认展示人员卡片列表 -->
+      <div v-if="!showDetailMode" class="list-mode">
+        <!-- 顶部搜索筛选栏（固定不滚动） -->
+        <div class="user-list-fixed">
+          <div class="title-row">
+            <h3 class="user-list-title">人员列表</h3>
+            <img
+              src="@/assets/images/icon/Home.png"
+              class="home-img-btn"
+              @click="goToHomePage"
+              title="返回主页"
+            >
+          </div>
+
+          <div class="search-date-row">
+            <!-- 日期选择器 -->
+            <el-date-picker
+              v-model="selectedDate"
+              type="date"
+              placeholder="选择日期"
+              format="YYYY-MM-DD"
+              value-format="YYYY-MM-DD"
+              class="date-picker"
+            />
+            <!-- 人员搜索框 -->
+            <el-input
+              v-model="searchKeyword"
+              placeholder="搜索姓名/工号"
+              class="search-input"
+              clearable
+            />
+          </div>
+
+          <!-- 筛选按钮 -->
+          <el-button
+            type="primary"
+            @click="filterUsers"
+            style="width: 100%; margin-top: 10px"
           >
+            筛选
+          </el-button>
         </div>
 
-        <!-- 日期选择 + 关键词搜索 行 -->
-        <div class="search-date-row">
-          <!-- 日期选择器：筛选某一天的轨迹 -->
-          <el-date-picker
-            v-model="selectedDate"
-            type="date"
-            placeholder="选择日期"
-            format="YYYY-MM-DD"
-            value-format="YYYY-MM-DD"
-            class="date-picker"
-          />
-          <!-- 搜索框：按姓名/工号模糊搜索 -->
-          <el-input
-            v-model="searchKeyword"
-            placeholder="搜索姓名/工号"
-            class="search-input"
-            @input="filterUsers"
-            clearable
-          />
-        </div>
+        <!-- 人员列表滚动区域 -->
+        <div class="user-list-scroll">
+          <div v-if="loading" class="user-list-loading">加载中...</div>
+          <div v-else-if="filteredUserList.length === 0" class="user-list-empty">暂无人员数据</div>
 
-        <!-- 筛选确认按钮 -->
-        <el-button
-          type="primary"
-          @click="filterUsers"
-          style="width: 100%; margin-top: 10px"
-        >
-          筛选
-        </el-button>
+          <!-- 人员卡片列表 -->
+          <div
+            v-for="user in filteredUserList"
+            :key="user.usercode"
+            class="user-card"
+            :class="{ active: selectedUser === user.usercode }"
+            @click="showUserDetail(user)"
+          >
+            <div class="user-card-header">
+              <span class="user-code">
+                {{ user.username || user.usercode }}
+                <span v-if="user.username && user.usercode" class="user-code-sub">
+                  ({{ user.usercode }})
+                </span>
+              </span>
+              <span class="user-time">{{ formatTime(user.createTime) }}</span>
+            </div>
+            <div class="user-card-body">
+              <div class="user-location">
+                <span class="label">经纬度</span>
+                <span class="value">{{ `${user.latitude.toFixed(4)}, ${user.longitude.toFixed(4)}` }}</span>
+              </div>
+              <div class="user-info" v-if="user.ckl || user.dsl">
+                查勘量: {{ user.ckl || '-' }} &nbsp;&nbsp;|&nbsp;&nbsp; 定损量: {{ user.dsl || '-' }}
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <!-- 人员列表滚动区域 -->
-      <div class="user-list-scroll">
-        <!-- 加载状态 -->
-        <div v-if="loading" class="user-list-loading">加载中...</div>
-        <!-- 无数据状态 -->
-        <div v-else-if="filteredUserList.length === 0" class="user-list-empty">暂无人员数据</div>
-
-        <!-- 人员卡片列表 -->
-        <div
-          v-for="user in filteredUserList"
-          :key="user.usercode"
-          class="user-card"
-          :class="{ active: selectedUser === user.usercode }"
-          @click="showUserHistory(user.usercode)"
-        >
-          <!-- 卡片头部：姓名/工号 + 时间 -->
-          <div class="user-card-header">
-            <span class="user-code">
-              {{ user.username || user.usercode }}
-              <span v-if="user.username && user.usercode" class="user-code-sub">
-                ({{ user.usercode }})
-              </span>
-            </span>
-            <span class="user-time">{{ formatTime(user.createTime) }}</span>
+      <!-- 详情模式：点击人员卡片后展示轨迹详情 -->
+      <div v-else class="detail-mode">
+        <div class="detail-header">
+          <div class="detail-top">
+            <h2 class="detail-title">{{ currentDetailUser.username }}</h2>
+            <el-button type="default" size="small" @click="backToList">返回列表</el-button>
           </div>
+          <div class="detail-info-row">
+            <div><label>工号</label><span>{{ currentDetailUser.usercode }}</span></div>
+            <div><label>查询日期</label><span>{{ selectedDate }}</span></div>
+            <div><label>查勘量</label><span>{{ currentDetailUser.ckl || '-' }}</span></div>
+            <div><label>定损量</label><span>{{ currentDetailUser.dsl || '-' }}</span></div>
+          </div>
+        </div>
 
-          <!-- 卡片内容：经纬度 + 查勘定损量 -->
-          <div class="user-card-body">
-            <div class="user-location">
-              <span class="label">经纬度</span>
-              <span class="value">{{ `${user.latitude.toFixed(4)}, ${user.longitude.toFixed(4)}` }}</span>
-            </div>
-            <div class="user-info" v-if="user.ckl || user.dsl">
-              查勘量: {{ user.ckl || '-' }} &nbsp;&nbsp;|&nbsp;&nbsp; 定损量: {{ user.dsl || '-' }}
+        <!-- 轨迹记录列表（可滚动） -->
+        <div class="detail-path-list">
+          <div class="path-title">轨迹经纬度记录</div>
+          <div
+            v-for="(item, idx) in currentUserPathList"
+            :key="idx"
+            class="path-item"
+          >
+            <div class="path-time">{{ formatTime(item.createTime) }}</div>
+            <div class="path-coord">
+              {{ item.latitude.toFixed(4) }}, {{ item.longitude.toFixed(4) }}
             </div>
           </div>
+          <div v-if="!currentUserPathList.length" class="no-path">暂无轨迹点</div>
         </div>
       </div>
     </div>
@@ -105,36 +125,33 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, computed } from 'vue'
 
-// 给全局 window.qq.maps 做类型声明，避免TS报错
+// 声明全局地图对象，避免TS报错
 declare global {
   interface Window {
     qq: any
   }
 }
 
-// ==================== 地图实例与覆盖物 ====================
-// 地图实例对象
+// ==================== 地图实例与覆盖物管理 ====================
+// 地图实例
 const map = ref<any>(null)
-// 存储所有点标记（人员位置、起点、终点）
+// 所有标记点（人员、起点、终点）
 const markers = ref<any[]>([])
-// 存储轨迹线
+// 轨迹线
 const polylines = ref<any[]>([])
 
-// ==================== 状态控制 ====================
-// 全局加载状态
+// ==================== 页面状态 ====================
 const loading = ref(true)
-// 错误提示信息
 const error = ref('')
-// 原始人员列表数据
+
+// ==================== 人员数据 ====================
 const userList = ref<any[]>([])
-// 当前选中的人员 usercode
+// 当前选中的人员工号
 const selectedUser = ref<string>('')
 
-// ==================== 搜索与筛选 ====================
-// 搜索关键词
+// ==================== 搜索筛选 ====================
 const searchKeyword = ref('')
-
-// 计算属性：根据关键词对人员列表进行模糊过滤
+// 计算属性：根据关键词过滤人员列表
 const filteredUserList = computed(() => {
   if (!searchKeyword.value) return userList.value
   const kw = searchKeyword.value.toLowerCase()
@@ -145,16 +162,26 @@ const filteredUserList = computed(() => {
   })
 })
 
+// ==================== 详情面板状态 ====================
+// 是否显示详情模式
+const showDetailMode = ref(false)
+// 当前查看详情的人员信息
+const currentDetailUser = ref<any>(null)
+// 当前人员的轨迹列表
+const currentUserPathList = ref<any[]>([])
+
 // ==================== 轨迹动画相关 ====================
-// 轨迹播放小车图标
+// 动画小车标记
 const playMarker = ref<any>(null)
 // 动画定时器
 const playTimer = ref<any>(null)
-// 动画速度（越小越快）
+// 动画速度
 const playSpeed = ref(16)
+// 上一次方向角度（用于平滑旋转）
+let lastHeading = 0
 
-// ==================== 日期与时间格式化 ====================
-// 获取今天日期并格式化为 YYYY-MM-DD
+// ==================== 日期时间格式化 ====================
+// 获取今天日期（YYYY-MM-DD）
 const today = new Date()
 const formatDate = (date: Date) => {
   const year = date.getFullYear()
@@ -165,7 +192,7 @@ const formatDate = (date: Date) => {
 // 默认选中今天
 const selectedDate = ref<string | null>(formatDate(today))
 
-// 时间格式化：转为本地标准时间字符串
+// 格式化时间：年-月-日 时:分:秒
 const formatTime = (timeString: string) => {
   const date = new Date(timeString)
   return date.toLocaleString('zh-CN', {
@@ -178,17 +205,18 @@ const formatTime = (timeString: string) => {
   })
 }
 
-// ==================== 轨迹平滑与方向计算 ====================
-// 记录上一次车头方向，用于平滑旋转
-let lastHeading = 0
-
-// 轨迹插值：把稀疏点加密成密集点，让小车移动更丝滑
+// ==================== 轨迹平滑动画工具 ====================
+/**
+ * 轨迹插值：让轨迹动画更流畅
+ * @param path 原始轨迹点
+ * @param segmentCount 插值密度
+ * @returns 平滑后的轨迹数组
+ */
 const interpolatePath = (path: any[], segmentCount = 120) => {
   let smoothPath: any[] = []
   for (let i = 0; i < path.length - 1; i++) {
     const start = path[i]
     const end = path[i + 1]
-    // 两点之间插入 segmentCount 个点
     for (let j = 0; j <= segmentCount; j++) {
       const t = j / segmentCount
       const lat = start.lat + (end.lat - start.lat) * t
@@ -199,12 +227,13 @@ const interpolatePath = (path: any[], segmentCount = 120) => {
   return smoothPath
 }
 
-// 计算车头方向并做平滑处理，防止突然360°旋转
+/**
+ * 计算小车朝向（平滑旋转，不跳变）
+ */
 const computeSmoothHeading = (from: any, to: any) => {
   const dy = to.lng - from.lng
   const dx = to.lat - from.lat
   let heading = Math.atan2(dy, dx) * 180 / Math.PI
-  // 解决角度跨180度时旋转异常
   const diff = heading - lastHeading
   if (Math.abs(diff) > 180) {
     heading -= Math.sign(diff) * 360
@@ -216,14 +245,12 @@ const computeSmoothHeading = (from: any, to: any) => {
 // ==================== 地图初始化 ====================
 const initMap = async () => {
   try {
-    // 判断地图SDK是否加载成功
     if (!window.qq || !window.qq.maps) {
       throw new Error('地图SDK加载失败')
     }
 
-    // 设置地图中心点（成都）
+    // 初始化地图中心点与配置
     const center = new window.qq.maps.LatLng(30.6799, 104.0571)
-    // 创建地图实例
     map.value = new window.qq.maps.Map(document.getElementById('map-container'), {
       center,
       zoom: 12,
@@ -231,7 +258,7 @@ const initMap = async () => {
       scrollwheel: true
     })
 
-    // 初始化后立即获取最新人员位置
+    // 加载人员最新位置
     await fetchLatestLocations()
     loading.value = false
   } catch (err: unknown) {
@@ -241,7 +268,7 @@ const initMap = async () => {
   }
 }
 
-// ==================== 获取人员最新位置列表 ====================
+// ==================== 获取所有人员最新位置 ====================
 const fetchLatestLocations = async (date?: string) => {
   try {
     let url = 'http://localhost:8080/api/locations/latest'
@@ -253,16 +280,14 @@ const fetchLatestLocations = async (date?: string) => {
 
     // 清除旧的地图覆盖物
     clearOverlays()
-
     if (!data || data.length === 0) {
       userList.value = []
       return
     }
 
-    // 更新人员列表
     userList.value = data
 
-    // 循环为每个人员创建地图标记点
+    // 为每个人员添加地图标记
     userList.value.forEach((user) => {
       const pos = new window.qq.maps.LatLng(user.latitude, user.longitude)
       const marker = new window.qq.maps.Marker({
@@ -273,7 +298,7 @@ const fetchLatestLocations = async (date?: string) => {
       })
       markers.value.push(marker)
 
-      // 创建点击弹窗信息
+      // 点击标记显示信息弹窗
       const info = new window.qq.maps.InfoWindow({
         content: `
           <div style="padding:8px;">
@@ -283,13 +308,12 @@ const fetchLatestLocations = async (date?: string) => {
             <strong>CKL：</strong>${user.ckl || '-'} | <strong>DSL：</strong>${user.dsl || '-'}`
       })
 
-      // 绑定点击事件：打开信息弹窗
       window.qq.maps.event.addListener(marker, 'click', () => {
         info.open(map.value, marker)
       })
     })
 
-    // 自动调整地图视野，显示所有标记
+    // 自动调整视野，显示所有标记
     if (markers.value.length) {
       const bounds = new window.qq.maps.LatLngBounds()
       markers.value.forEach((m) => bounds.extend(m.getPosition()))
@@ -303,30 +327,41 @@ const fetchLatestLocations = async (date?: string) => {
 
 // ==================== 筛选按钮事件 ====================
 const filterUsers = async () => {
-  // 根据选中日期重新拉取数据
   await fetchLatestLocations(selectedDate.value || undefined)
 }
 
-// ==================== 返回主页视图 ====================
+// ==================== 返回主页：重置所有状态 ====================
 const goToHomePage = async () => {
-  // 清空选中与搜索状态
   selectedUser.value = ''
   searchKeyword.value = ''
-  // 清除轨迹重新加载最新位置
+  showDetailMode.value = false
   clearOverlays()
   await fetchLatestLocations(selectedDate.value || undefined)
 }
 
-// ==================== 查看单人历史轨迹 ====================
+// ==================== 从详情页返回列表 ====================
+const backToList = () => {
+  showDetailMode.value = false
+  currentDetailUser.value = null
+  currentUserPathList.value = []
+  selectedUser.value = ''
+}
+
+// ==================== 点击卡片：显示人员详情 ====================
+const showUserDetail = async (user: any) => {
+  selectedUser.value = user.usercode
+  showDetailMode.value = true
+  currentDetailUser.value = user
+  // 加载该人员历史轨迹
+  await showUserHistory(user.usercode)
+}
+
+// ==================== 获取单人历史轨迹并绘制 ====================
 const showUserHistory = async (usercode: string) => {
   try {
-    // 标记当前选中人员
-    selectedUser.value = usercode
-    // 清除旧轨迹
     clearOverlays()
     lastHeading = 0
 
-    // 请求该人员某天的轨迹数据
     let url = `http://localhost:8080/api/locations/user/${usercode}`
     if (selectedDate.value) url += `?date=${selectedDate.value}`
 
@@ -336,20 +371,26 @@ const showUserHistory = async (usercode: string) => {
 
     if (!data || data.length === 0) {
       error.value = '该用户当日无轨迹数据'
+      currentUserPathList.value = []
       return
     }
 
-    // 按时间升序排序轨迹点
+    // 地图绘制：按时间正序
     const sortedPath = data.sort((a: any, b: any) =>
       new Date(a.createTime).getTime() - new Date(b.createTime).getTime()
     )
+    // 列表展示：最新时间在前
+    const reversePath = [...data].sort((a: any, b: any) =>
+      new Date(b.createTime).getTime() - new Date(a.createTime).getTime()
+    )
+    currentUserPathList.value = reversePath
 
-    // 构造地图经纬度路径
+    // 构造地图经纬度数组
     const path = sortedPath.map((item: any) =>
       new window.qq.maps.LatLng(item.latitude, item.longitude)
     )
 
-    // 绘制轨迹路线
+    // 绘制轨迹线
     const line = new window.qq.maps.Polyline({
       map: map.value,
       path: path,
@@ -360,9 +401,8 @@ const showUserHistory = async (usercode: string) => {
     polylines.value.push(line)
 
     // 起点标记
-    const startPoint = path[0]
     const startMarker = new window.qq.maps.Marker({
-      position: startPoint,
+      position: path[0],
       map: map.value,
       icon: new window.qq.maps.MarkerImage(
         'src/assets/images/icon/FirstPoint.png',
@@ -376,9 +416,8 @@ const showUserHistory = async (usercode: string) => {
     markers.value.push(startMarker)
 
     // 终点标记
-    const endPoint = path[path.length - 1]
     const endMarker = new window.qq.maps.Marker({
-      position: endPoint,
+      position: path[path.length - 1],
       map: map.value,
       icon: new window.qq.maps.MarkerImage(
         'src/assets/images/icon/EndPoint.png',
@@ -391,7 +430,7 @@ const showUserHistory = async (usercode: string) => {
     })
     markers.value.push(endMarker)
 
-    // 创建轨迹动画小车图标
+    // 小车动画标记
     playMarker.value = new window.qq.maps.Marker({
       position: path[0],
       map: map.value,
@@ -406,68 +445,57 @@ const showUserHistory = async (usercode: string) => {
       anchor: new window.qq.maps.Point(18, 18)
     })
 
-    // 开始小车轨迹动画
+    // 开始播放动画
     startPlay(path)
 
-    // 自动缩放视野以展示整条轨迹
+    // 自动适配视野
     const bounds = new window.qq.maps.LatLngBounds()
     path.forEach((p: any) => bounds.extend(p))
     map.value.fitBounds(bounds)
 
     error.value = ''
   } catch (e) {
-    console.error('获取轨迹失败详情:', e)
+    console.error('获取轨迹失败:', e)
     error.value = `获取轨迹失败: ${(e as Error).message}`
   }
 }
 
-// ==================== 轨迹动画播放 ====================
+// ==================== 轨迹小车动画 ====================
 const startPlay = (path: any[]) => {
-  // 清除已有动画
   if (playTimer.value) clearInterval(playTimer.value)
-  // 对轨迹进行插值加密
+  // 生成平滑轨迹
   const smoothPath = interpolatePath(path, 200)
   let index = 0
   const len = smoothPath.length
 
-  // 动画帧函数
   const run = () => {
     if (index >= len) {
-      index = 0 // 循环播放
+      index = 0
     }
-
     const curr = smoothPath[index]
     const next = smoothPath[Math.min(index + 1, len - 1)]
-    // 计算车头方向
+    // 计算朝向
     const heading = computeSmoothHeading(curr, next)
-
-    // 更新小车位置与角度
+    // 更新位置与角度
     playMarker.value.setPosition(curr)
     playMarker.value.setRotation(heading)
-
     index++
   }
 
-  // 启动定时器
   playTimer.value = setInterval(run, playSpeed.value)
 }
 
-// ==================== 清除地图所有覆盖物 ====================
+// ==================== 清空地图所有覆盖物与定时器 ====================
 const clearOverlays = () => {
-  // 清除动画
   if (playTimer.value) clearInterval(playTimer.value)
   if (playMarker.value) {
     playMarker.value.setMap(null)
     playMarker.value = null
   }
-
-  // 清除所有标记和折线
   if (map.value) {
     markers.value.forEach(m => m.setMap(null))
     polylines.value.forEach(p => p.setMap(null))
   }
-
-  // 清空数组
   markers.value = []
   polylines.value = []
 }
@@ -478,7 +506,7 @@ onMounted(() => {
   initMap()
 })
 
-// 页面卸载前清理地图资源
+// 页面卸载前清理资源
 onBeforeUnmount(() => {
   clearOverlays()
   map.value = null
@@ -486,7 +514,6 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-/* 输入框文字颜色强化，避免被全局样式覆盖变浅 */
 :deep(.el-input__inner) {
   color: #1d2129 !important;
   --el-input-text-color: #1d2129 !important;
@@ -495,7 +522,6 @@ onBeforeUnmount(() => {
   color: #999 !important;
 }
 
-/* 强制覆盖日期选择器默认宽度，使 flex 布局能正常分配比例 */
 :deep(.el-date-editor.el-input--mini),
 :deep(.el-date-editor.el-input),
 :deep(.el-date-editor) {
@@ -504,7 +530,6 @@ onBeforeUnmount(() => {
   max-width: 100% !important;
 }
 
-/* 日期 + 搜索框横向布局 */
 .search-date-row {
   display: flex;
   gap: 8px;
@@ -520,16 +545,15 @@ onBeforeUnmount(() => {
   min-width: 125px;
 }
 
-/* 整体布局：地图 + 人员面板 */
+/* 布局容器 */
 .user-map-container {
   display: flex;
   width: 100%;
   height: 100%;
-  position: relative;
   background: #f5f7fa;
 }
 
-/* 地图区域样式 */
+/* 地图区域 */
 .map-content {
   flex: 1;
   position: relative;
@@ -542,7 +566,7 @@ onBeforeUnmount(() => {
   height: 500px;
 }
 
-/* 右侧人员列表面板 */
+/* 右侧面板 */
 .user-list {
   width: 320px;
   height: 500px;
@@ -553,8 +577,17 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  box-sizing: border-box;
 }
-/* 顶部搜索栏固定，不跟随滚动 */
+
+/* 列表模式 */
+.list-mode{
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* 顶部搜索栏固定 */
 .user-list-fixed {
   flex-shrink: 0;
   padding-bottom: 16px;
@@ -562,7 +595,6 @@ onBeforeUnmount(() => {
   margin-bottom: 8px;
 }
 
-/* 标题栏样式 */
 .title-row {
   display: flex;
   justify-content: space-between;
@@ -576,7 +608,6 @@ onBeforeUnmount(() => {
   margin: 0;
   letter-spacing: 0.5px;
 }
-/* 返回主页图标 */
 .home-img-btn {
   width: 26px;
   height: 26px;
@@ -589,29 +620,16 @@ onBeforeUnmount(() => {
   transform: scale(1.08);
 }
 
-/* 滚动列表区域：超细滚动条美化 */
+/* 列表滚动区域 */
 .user-list-scroll {
   flex: 1;
-  overflow-y: auto;
+  overflow-y: auto !important;
   padding-top: 12px;
   padding-bottom: 4px;
-  padding-right: 0px !important;
-  margin-right: -8px;
-}
-.user-list-scroll::-webkit-scrollbar {
-  width: 2px !important;
-  height: 2px !important;
-}
-.user-list-scroll::-webkit-scrollbar-thumb {
-  background: rgba(150, 150, 150, 0.3) !important;
-  border-radius: 10px !important;
-  opacity: 0.4 !important;
-}
-.user-list-scroll::-webkit-scrollbar-track {
-  background: transparent !important;
+  box-sizing: border-box;
 }
 
-/* 人员卡片样式 */
+/* 人员卡片 */
 .user-card {
   background: #ffffff;
   border-radius: 10px;
@@ -621,20 +639,17 @@ onBeforeUnmount(() => {
   transition: all 0.28s ease;
   border: 1px solid #f0f2f5;
 }
-/* 卡片悬浮效果 */
 .user-card:hover {
   transform: translateY(-3px);
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
   border-color: #409EFF;
 }
-/* 卡片选中样式 */
 .user-card.active {
   border-color: #409EFF;
   background: linear-gradient(135deg, #edf7ff 0%, #e8f3ff 100%);
   box-shadow: 0 4px 12px rgba(64, 158, 255, 0.15);
 }
 
-/* 卡片内部结构 */
 .user-card-header {
   display: flex;
   justify-content: space-between;
@@ -657,7 +672,6 @@ onBeforeUnmount(() => {
   color: #86909c;
   white-space: nowrap;
 }
-
 .user-card-body {
   font-size: 14px;
   line-height: 1.5;
@@ -686,7 +700,104 @@ onBeforeUnmount(() => {
   margin-top: 6px;
 }
 
-/* 加载与错误提示样式 */
+/* 详情模式 */
+.detail-mode {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.detail-header {
+  flex-shrink: 0;
+  padding: 20px;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border-radius: 12px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.04);
+}
+.detail-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.detail-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0;
+  letter-spacing: 0.3px;
+}
+.detail-info-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 14px;
+}
+.detail-info-row div {
+  display: flex;
+  align-items: center;
+}
+.detail-info-row label {
+  width: 68px;
+  font-weight: 600;
+  color: #64748b;
+  font-size: 13px;
+}
+.detail-info-row span {
+  color: #1e293b;
+  font-weight: 500;
+}
+
+/* 轨迹列表 */
+.detail-path-list {
+  flex: 1;
+  overflow-y: auto !important;
+  padding-top: 8px;
+  padding-right: 8px;
+}
+
+.path-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 12px;
+  padding-left: 4px;
+}
+.path-item {
+  padding: 14px;
+  border-radius: 10px;
+  background: #fafbfb;
+  margin-bottom: 10px;
+  border: 1px solid #f1f5f9;
+  transition: all 0.2s ease;
+}
+.path-item:hover {
+  background: #ffffff;
+  border-color: #e2e8f0;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+}
+.path-time {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+.path-coord {
+  font-size: 13px;
+  font-family: 'Menlo', monospace;
+  color: #1e293b;
+  font-weight: 500;
+}
+.no-path {
+  padding: 40px 0;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 14px;
+}
+
+/* 加载与错误提示 */
 .loading, .error {
   position: absolute;
   top: 50%;
@@ -699,13 +810,13 @@ onBeforeUnmount(() => {
   color: #f56c6c;
 }
 .user-list-loading, .user-list-empty {
-  padding: 50px 0;
+  padding: 30px 0;
   color: #999;
   text-align: center;
   font-size: 14px;
 }
 
-/* 移动端响应式适配 */
+/* 移动端适配 */
 @media (max-width: 768px) {
   .user-map-container {
     flex-direction: column;
@@ -716,5 +827,23 @@ onBeforeUnmount(() => {
     height: auto;
     max-height: 280px;
   }
+}
+</style>
+
+<style>
+/* 自定义超细滚动条 */
+.user-map-container .user-list-scroll::-webkit-scrollbar,
+.user-map-container .detail-path-list::-webkit-scrollbar {
+  width: 2px !important;
+  height: 2px !important;
+}
+.user-map-container .user-list-scroll::-webkit-scrollbar-thumb,
+.user-map-container .detail-path-list::-webkit-scrollbar-thumb {
+  background: #c0c0c0 !important;
+  border-radius: 10px !important;
+}
+.user-map-container .user-list-scroll::-webkit-scrollbar-track,
+.user-map-container .detail-path-list::-webkit-scrollbar-track {
+  background: transparent !important;
 }
 </style>
