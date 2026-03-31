@@ -9,7 +9,6 @@
     <div class="user-list">
       <h3 class="user-list-title">人员列表</h3>
 
-      <!-- 时间选择器 -->
       <div class="time-filter">
         <el-date-picker
           v-model="selectedDate"
@@ -69,12 +68,10 @@ const error = ref('')
 const userList = ref<any[]>([])
 const selectedUser = ref<string>('')
 
-// 轨迹回放专用
-const playMarker = ref<any>(null) // 动态移动点
+const playMarker = ref<any>(null)
 const playTimer = ref<any>(null)
-const playSpeed = ref(800) // 移动速度（毫秒）
+const playSpeed = ref(16)
 
-// 默认日期：今天
 const today = new Date()
 const formatDate = (date: Date) => {
   const year = date.getFullYear()
@@ -84,7 +81,6 @@ const formatDate = (date: Date) => {
 }
 const selectedDate = ref<string | null>(formatDate(today))
 
-// 格式化时间
 const formatTime = (timeString: string) => {
   const date = new Date(timeString)
   return date.toLocaleString('zh-CN', {
@@ -97,7 +93,40 @@ const formatTime = (timeString: string) => {
   })
 }
 
-// 初始化地图
+
+let lastHeading = 0
+
+// 轨迹超平滑插值（路径更密，角度更稳）
+const interpolatePath = (path: any[], segmentCount = 120) => {
+  let smoothPath: any[] = []
+  for (let i = 0; i < path.length - 1; i++) {
+    const start = path[i]
+    const end = path[i + 1]
+    for (let j = 0; j <= segmentCount; j++) {
+      const t = j / segmentCount
+      const lat = start.lat + (end.lat - start.lat) * t
+      const lng = start.lng + (end.lng - start.lng) * t
+      smoothPath.push(new window.qq.maps.LatLng(lat, lng))
+    }
+  }
+  return smoothPath
+}
+
+// 计算航向 + 平滑角度（不跳变）
+const computeSmoothHeading = (from: any, to: any) => {
+  const dy = to.lng - from.lng
+  const dx = to.lat - from.lat
+  let heading = Math.atan2(dy, dx) * 180 / Math.PI
+
+  // 【关键】角度不突变，缓慢过渡
+  const diff = heading - lastHeading
+  if (Math.abs(diff) > 180) {
+    heading -= Math.sign(diff) * 360
+  }
+  lastHeading = heading
+  return heading
+}
+
 const initMap = async () => {
   try {
     if (!window.qq || !window.qq.maps) {
@@ -121,13 +150,13 @@ const initMap = async () => {
   }
 }
 
-// 获取【指定日期】所有用户最新位置
 const fetchLatestLocations = async (date?: string) => {
   try {
     let url = 'http://localhost:8080/api/locations/latest'
     if (date) url += `?date=${date}`
 
     const res = await fetch(url)
+    if (!res.ok) throw new Error(`HTTP错误: ${res.status}`)
     const data = await res.json()
     console.log('最新人员数据：', data)
 
@@ -140,7 +169,6 @@ const fetchLatestLocations = async (date?: string) => {
 
     userList.value = data
 
-    // 绘制标记
     userList.value.forEach((user) => {
       const pos = new window.qq.maps.LatLng(user.latitude, user.longitude)
       const marker = new window.qq.maps.Marker({
@@ -150,7 +178,6 @@ const fetchLatestLocations = async (date?: string) => {
       })
       markers.value.push(marker)
 
-      // 信息窗口
       const info = new window.qq.maps.InfoWindow({
         content: `
           <div style="padding:8px;">
@@ -167,7 +194,6 @@ const fetchLatestLocations = async (date?: string) => {
       })
     })
 
-    // 自适应视野
     if (markers.value.length) {
       const bounds = new window.qq.maps.LatLngBounds()
       markers.value.forEach((m) => bounds.extend(m.getPosition()))
@@ -179,105 +205,133 @@ const fetchLatestLocations = async (date?: string) => {
   }
 }
 
-// 筛选按钮
 const filterUsers = async () => {
   await fetchLatestLocations(selectedDate.value || undefined)
 }
 
-// 查看用户轨迹：绘制路线 + 动态点回放
 const showUserHistory = async (usercode: string) => {
   try {
     selectedUser.value = usercode
     clearOverlays()
+    lastHeading = 0 // 重置角度
 
     let url = `http://localhost:8080/api/locations/user/${usercode}`
     if (selectedDate.value) url += `?date=${selectedDate.value}`
 
+    console.log('请求轨迹接口:', url)
     const res = await fetch(url)
+    if (!res.ok) throw new Error(`HTTP错误: ${res.status}`)
     const data = await res.json()
-    console.log('用户轨迹：', data)
+    console.log('用户轨迹数据:', data)
 
     if (!data || data.length === 0) {
       error.value = '该用户当日无轨迹数据'
       return
     }
 
-    // 按时间排序
     const sortedPath = data.sort((a: any, b: any) =>
       new Date(a.createTime).getTime() - new Date(b.createTime).getTime()
     )
 
-    // 生成轨迹路线坐标
     const path = sortedPath.map((item: any) =>
       new window.qq.maps.LatLng(item.latitude, item.longitude)
     )
 
-    // 绘制蓝色轨迹线
+    // 轨迹
     const line = new window.qq.maps.Polyline({
       map: map.value,
-      path,
+      path: path,
       strokeColor: '#409EFF',
-      strokeWeight: 5,
-      strokeOpacity: 0.9
+      strokeWeight: 4,
+      strokeOpacity: 0.6
     })
     polylines.value.push(line)
 
-    // 创建动态蓝色回放点
-    const firstPos = path[0]
-    playMarker.value = new window.qq.maps.Marker({
-      position: firstPos,
+    // 起点终点
+    const startPoint = path[0]
+    const endPoint = path[path.length - 1]
+
+    const startMarker = new window.qq.maps.Marker({
+      position: startPoint,
       map: map.value,
       icon: new window.qq.maps.MarkerImage(
-        'src/assets/images/avatar/avatar7.webp',
-        new window.qq.maps.Size(18, 18),
+        'src/assets/images/icon/FirstPoint.png',
+        new window.qq.maps.Size(20, 20),
         null,
-        null,
-        new window.qq.maps.Size(18, 18)
+        new window.qq.maps.Point(12, 20),
+        new window.qq.maps.Size(20, 20)
       ),
-      zIndex: 999
+      zIndex: 100
+    })
+    markers.value.push(startMarker)
+
+    const endMarker = new window.qq.maps.Marker({
+      position: endPoint,
+      map: map.value,
+      icon: new window.qq.maps.MarkerImage(
+        'src/assets/images/icon/EndPoint.png',
+        new window.qq.maps.Size(20, 20),
+        null,
+        new window.qq.maps.Point(12, 20),
+        new window.qq.maps.Size(20, 20)
+      ),
+      zIndex: 100
+    })
+    markers.value.push(endMarker)
+
+    // 小车
+    playMarker.value = new window.qq.maps.Marker({
+      position: path[0],
+      map: map.value,
+      icon: new window.qq.maps.MarkerImage(
+        'src/assets/images/icon/car.png',
+        new window.qq.maps.Size(36, 36),
+        null,
+        null,
+        new window.qq.maps.Size(36, 36)
+      ),
+      zIndex: 999,
+      anchor: new window.qq.maps.Point(18, 18)
     })
 
-    // 自定义蓝色圆点样式
-    const markerDom = playMarker.value.Qa
-    if (markerDom) {
-      markerDom.style.backgroundColor = '#409EFF'
-      markerDom.style.borderRadius = '50%'
-      markerDom.style.border = '3px solid white'
-      markerDom.style.boxShadow = '0 0 5px rgba(0,0,0,0.3)'
-    }
-
-    // 自动回放
     startPlay(path)
 
-    // 视野自适应
     const bounds = new window.qq.maps.LatLngBounds()
     path.forEach((p: any) => bounds.extend(p))
     map.value.fitBounds(bounds)
 
     error.value = ''
   } catch (e) {
-    console.error('获取轨迹失败', e)
-    error.value = '获取轨迹失败'
+    console.error('获取轨迹失败详情:', e)
+    error.value = `获取轨迹失败: ${(e as Error).message}`
   }
 }
 
-// 开始自动回放
+// 【无抖动核心】平滑移动 + 不跳变角度
 const startPlay = (path: any[]) => {
+  if (playTimer.value) clearInterval(playTimer.value)
+  const smoothPath = interpolatePath(path, 200)
   let index = 0
-  const len = path.length
+  const len = smoothPath.length
 
   const run = () => {
     if (index >= len) {
-      index = 0 // 循环
+      index = 0
     }
-    playMarker.value.setPosition(path[index])
+
+    const curr = smoothPath[index]
+    const next = smoothPath[Math.min(index + 1, len - 1)]
+    const heading = computeSmoothHeading(curr, next)
+
+    playMarker.value.setPosition(curr)
+    playMarker.value.setRotation(heading)
+
     index++
   }
 
   playTimer.value = setInterval(run, playSpeed.value)
 }
 
-// 清理
 const clearOverlays = () => {
   if (playTimer.value) clearInterval(playTimer.value)
   if (playMarker.value) {
