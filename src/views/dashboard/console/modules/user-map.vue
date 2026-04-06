@@ -98,9 +98,14 @@
         </div>
         <div class="detail-path-list">
           <div class="path-title">轨迹经纬度记录</div>
-          <div v-for="(item, idx) in currentUserPathList" :key="idx" class="path-item">
+          <div
+            v-for="(item, idx) in currentUserPathList"
+            :key="idx"
+            class="path-item"
+            @click="showPointOnMap(item)"
+          >
             <div class="path-time">{{ formatTime(item.createTime) }}</div>
-            <div class="path-coord"> {{ item.address || '解析中...' }}</div>
+            <div class="path-coord">{{ item.address || '解析中...' }}</div>
           </div>
           <div v-if="!currentUserPathList.length" class="no-path">暂无轨迹点</div>
         </div>
@@ -112,41 +117,49 @@
 <script setup lang="ts">
   import { onMounted, onBeforeUnmount, ref, computed } from 'vue'
 
+  // 全局声明腾讯地图SDK，避免TS类型报错
   declare global {
     interface Window {
       TMap: any
     }
   }
 
-  // 地图对象与图层
-  let map: any = null
-  let markerLayer: any = null // 所有人员位置标记
-  let labelLayer: any = null // 人员姓名标签（红色，位于图标下方）
-  let trackLineLayer: any = null // 轨迹线（带箭头）
-  let startEndMarkerLayer: any = null // 起点终点标记
-  let carMarkerLayer: any = null // 车辆标记（MultiMarker）
+  // ==================== 地图实例与图层对象 ====================
+  let map: any = null // 地图主实例
+  let markerLayer: any = null // 人员点位图层
+  let labelLayer: any = null // 人员名称标签图层
+  let trackLineLayer: any = null // 轨迹连线图层
+  let startEndMarkerLayer: any = null // 轨迹起点/终点标记图层
+  let carMarkerLayer: any = null // 车辆动画标记图层
+  let tempMarker: any = null // 点击轨迹点时的临时高亮标记
+  let infoWindow: any = null // 地图信息弹窗
+  let currentTrackBounds: any = null // 当前轨迹的自动视野范围
+  const currentTrackPadding = { top: 50, bottom: 50, left: 50, right: 50 } // 轨迹视野边距
 
-  // 响应式数据
-  const loading = ref(true)
-  const error = ref('')
-  const userList = ref<any[]>([])
-  const selectedUser = ref<string>('')
-  const searchKeyword = ref('')
-  const showDetailMode = ref(false)
-  const currentDetailUser = ref<any>(null)
-  const currentUserPathList = ref<any[]>([])
+  // ==================== 响应式状态 ====================
+  const loading = ref(true) // 加载状态
+  const error = ref('') // 错误提示信息
+  const userList = ref<any[]>([]) // 所有人员最新位置列表
+  const selectedUser = ref<string>('') // 当前选中的人员工号
+  const searchKeyword = ref('') // 搜索关键词
+  const showDetailMode = ref(false) // 是否显示轨迹详情模式
+  const currentDetailUser = ref<any>(null) // 当前查看详情的用户
+  const currentUserPathList = ref<any[]>([]) // 当前用户的轨迹点列表
 
-  // 日期相关
+  // ==================== 日期处理 ====================
   const today = new Date()
+  // 格式化日期为 YYYY-MM-DD 字符串
   const formatDate = (date: Date) => {
     const year = date.getFullYear()
     const month = String(date.getMonth() + 1).padStart(2, '0')
     const day = String(date.getDate()).padStart(2, '0')
     return `${year}-${month}-${day}`
   }
+  // 默认选中今天
   const selectedDate = ref<string | null>(formatDate(today))
 
-  // 计算属性：过滤人员
+  // ==================== 计算属性 ====================
+  // 根据关键词过滤人员列表（姓名/工号）
   const filteredUserList = computed(() => {
     if (!searchKeyword.value) return userList.value
     const kw = searchKeyword.value.toLowerCase()
@@ -157,7 +170,8 @@
     })
   })
 
-  // 辅助函数：格式化时间
+  // ==================== 工具函数 ====================
+  // 格式化时间为本地标准时间
   const formatTime = (timeString: string) => {
     const date = new Date(timeString)
     return date.toLocaleString('zh-CN', {
@@ -170,10 +184,10 @@
     })
   }
 
-  // 初始化地图
+  // ==================== 地图初始化 ====================
   const initMap = async () => {
     try {
-      // 等待 TMap 加载完成
+      // 等待腾讯地图SDK加载完成
       let attempts = 0
       while (!window.TMap && attempts < 100) {
         await new Promise((resolve) => setTimeout(resolve, 100))
@@ -184,6 +198,7 @@
       const container = document.getElementById('map-container')
       if (!container) throw new Error('地图容器未找到')
 
+      // 创建地图实例
       map = new window.TMap.Map(container, {
         center: new window.TMap.LatLng(30.6799, 104.0571),
         zoom: 12,
@@ -194,6 +209,7 @@
         mapStyleId: 'style1'
       })
 
+      // 加载人员位置数据
       await fetchLatestLocations()
       loading.value = false
     } catch (err: any) {
@@ -203,7 +219,7 @@
     }
   }
 
-  // 获取所有人员最新位置
+  // ==================== 获取所有人员最新位置 ====================
   const fetchLatestLocations = async (date?: string) => {
     try {
       let url = 'http://localhost:8080/api/locations/latest'
@@ -211,7 +227,7 @@
       const res = await fetch(url)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
-      clearOverlays()
+      clearOverlays() // 清空旧图层
 
       if (!data || data.length === 0) {
         userList.value = []
@@ -219,7 +235,7 @@
       }
       userList.value = data
 
-      // 添加人员标记
+      // 构建人员点位
       const geometries = userList.value.map((user) => ({
         id: `user-${user.usercode}`,
         styleId: 'location',
@@ -227,6 +243,7 @@
         properties: { title: `${user.username || ''} (${user.usercode})`, user }
       }))
 
+      // 创建点位图层
       markerLayer = new window.TMap.MultiMarker({
         map,
         styles: {
@@ -240,27 +257,29 @@
         geometries
       })
 
+      // 点击地图点位 → 打开轨迹详情
       markerLayer.on('click', (evt: any) => {
         const user = evt.geometry?.properties?.user
         if (user) showUserDetail(user)
       })
 
-      // 添加红色用户名标签（位于图标下方）
+      // 构建人员名称标签
       const labelGeometries = userList.value.map((user) => ({
         id: `label-${user.usercode}`,
         styleId: 'userLabel',
         position: new window.TMap.LatLng(user.latitude, user.longitude),
         content: user.username || user.usercode,
-        offset: { x: 0, y: 20 } // 向下偏移20像素，使标签显示在图标下方
+        offset: { x: 0, y: 20 }
       }))
 
+      // 创建标签图层
       labelLayer = new window.TMap.MultiLabel({
         map,
         styles: {
           userLabel: new window.TMap.LabelStyle({
-            color: '#ff3333', // 红色
+            color: '#ff3333',
             size: 12,
-            offset: { x: 0, y: 0 }, // 实际偏移由每个几何体的 offset 决定
+            offset: { x: 0, y: 0 },
             angle: 0,
             alignment: 'center',
             verticalAlignment: 'top'
@@ -269,12 +288,11 @@
         geometries: labelGeometries
       })
 
+      // 自动调整视野，显示所有人员
       if (geometries.length) {
         const bounds = new window.TMap.LatLngBounds()
         geometries.forEach((g) => bounds.extend(g.position))
-        map.fitBounds(bounds, {
-          padding: { top: 50, bottom: 50, left: 50, right: 50 }
-        })
+        map.fitBounds(bounds, { padding: currentTrackPadding })
       }
     } catch (err: any) {
       console.error('获取人员数据失败', err)
@@ -282,12 +300,12 @@
     }
   }
 
-  // 筛选按钮点击
+  // 点击筛选按钮 → 根据日期刷新位置
   const filterUsers = async () => {
     await fetchLatestLocations(selectedDate.value || undefined)
   }
 
-  // 返回主页（重置所有状态）
+  // 返回主页 → 重置所有状态并刷新列表
   const goToHomePage = async () => {
     selectedUser.value = ''
     searchKeyword.value = ''
@@ -298,7 +316,7 @@
     await fetchLatestLocations(selectedDate.value || undefined)
   }
 
-  // 从详情返回列表
+  // 从轨迹详情返回人员列表
   const backToList = () => {
     showDetailMode.value = false
     currentDetailUser.value = null
@@ -308,7 +326,7 @@
     fetchLatestLocations(selectedDate.value || undefined)
   }
 
-  // 显示用户详情并加载轨迹
+  // 显示某个人的轨迹详情
   const showUserDetail = async (user: any) => {
     selectedUser.value = user.usercode
     showDetailMode.value = true
@@ -316,15 +334,16 @@
     await loadUserTrack(user.usercode)
   }
 
-  // 加载单个用户的轨迹数据并播放
+  // ==================== 加载单个用户全天轨迹 ====================
   const loadUserTrack = async (usercode: string) => {
     try {
       if (!map) {
         error.value = '地图未初始化'
         return
       }
-      clearOverlays() // 清除所有图层
+      clearOverlays()
 
+      // 请求轨迹接口
       let url = `http://localhost:8080/api/locations/user/${usercode}`
       if (selectedDate.value) url += `?date=${selectedDate.value}`
       const res = await fetch(url)
@@ -337,22 +356,23 @@
         return
       }
 
-      // 按时间排序（从早到晚用于轨迹线）
+      // 按时间正序 → 用于绘制轨迹线
       const sorted = [...data].sort(
         (a, b) => new Date(a.createTime).getTime() - new Date(b.createTime).getTime()
       )
-      // 倒序用于右侧列表展示（最新在上）
+      // 按时间倒序 → 用于列表展示最新点在上
       currentUserPathList.value = [...data].sort(
         (a, b) => new Date(b.createTime).getTime() - new Date(a.createTime).getTime()
       )
 
+      // 构造轨迹经纬度数组
       const path = sorted.map((p) => new window.TMap.LatLng(p.latitude, p.longitude))
       if (path.length < 2) {
         error.value = '轨迹点不足，无法回放'
         return
       }
 
-      // 1. 绘制轨迹线（带箭头）
+      // 绘制带箭头的轨迹线
       trackLineLayer = new window.TMap.MultiPolyline({
         map,
         styles: {
@@ -368,7 +388,7 @@
         geometries: [{ id: `track-${usercode}`, styleId: 'arrow', paths: path }]
       })
 
-      // 2. 起点终点标记
+      // 绘制起点 & 终点
       startEndMarkerLayer = new window.TMap.MultiMarker({
         map,
         styles: {
@@ -391,7 +411,7 @@
         ]
       })
 
-      // 3. 车辆标记（MultiMarker）
+      // 创建车辆动画图标
       const carIcon = 'https://mapapi.qq.com/web/lbs/javascriptGL/demo/img/car.png'
       carMarkerLayer = new window.TMap.MultiMarker({
         map,
@@ -408,14 +428,13 @@
         geometries: [{ id: 'car', styleId: 'car', position: path[0] }]
       })
 
-      // 调整视野
+      // 自动缩放视野以包含整条轨迹
       const bounds = new window.TMap.LatLngBounds()
       path.forEach((p) => bounds.extend(p))
-      map.fitBounds(bounds, {
-        padding: { top: 50, bottom: 50, left: 50, right: 50 }
-      })
+      currentTrackBounds = bounds
+      map.fitBounds(bounds, { padding: currentTrackPadding })
 
-      // 延迟启动回放
+      // 延迟启动轨迹回放
       setTimeout(() => {
         startPlayback(path)
       }, 200)
@@ -427,7 +446,7 @@
     }
   }
 
-  // 轨迹回放核心函数
+  // ==================== 车辆沿轨迹回放 ====================
   const startPlayback = (path: any[]) => {
     if (!carMarkerLayer) {
       console.error('车辆标记未创建')
@@ -440,8 +459,9 @@
     }
 
     try {
+      // 车辆沿路径移动
       carMarkerLayer.moveAlong({ car: { path, speed: 200 } }, { autoRotation: true })
-
+      // 移动时擦除已走过的轨迹
       carMarkerLayer.on('moving', (e: any) => {
         const passed = e.car?.passedLatLngs
         if (passed && passed.length > 0 && trackLineLayer) {
@@ -462,35 +482,129 @@
     }
   }
 
-  // 清理所有覆盖物
-  const clearOverlays = () => {
-    if (carMarkerLayer) {
-      carMarkerLayer.setMap(null)
-      carMarkerLayer = null
+  // 清除临时标记并恢复轨迹视野
+  const clearTempMarkerAndRestoreBounds = () => {
+    if (tempMarker) {
+      tempMarker.setMap(null)
+      tempMarker = null
     }
-    if (markerLayer) {
-      markerLayer.setMap(null)
-      markerLayer = null
-    }
-    if (labelLayer) {
-      labelLayer.setMap(null)
-      labelLayer = null
-    }
-    if (trackLineLayer) {
-      trackLineLayer.setMap(null)
-      trackLineLayer = null
-    }
-    if (startEndMarkerLayer) {
-      startEndMarkerLayer.setMap(null)
-      startEndMarkerLayer = null
+    if (currentTrackBounds && map) {
+      map.fitBounds(currentTrackBounds, { padding: currentTrackPadding })
     }
   }
 
-  // 生命周期
+  // ==================== 点击轨迹点 → 在地图上显示该点 ====================
+  const showPointOnMap = (point: any) => {
+    if (!map) return
+
+    // 关闭已存在的弹窗与标记
+    if (infoWindow) {
+      infoWindow.close()
+      infoWindow = null
+    }
+    if (tempMarker) {
+      tempMarker.setMap(null)
+      tempMarker = null
+    }
+
+    const latLng = new window.TMap.LatLng(point.latitude, point.longitude)
+
+    // 创建临时高亮标记
+    tempMarker = new window.TMap.MultiMarker({
+      map,
+      styles: {
+        highlight: new window.TMap.MarkerStyle({
+          width: 30,
+          height: 30,
+          anchor: { x: 15, y: 30 },
+          src: '/src/assets/images/icon/Location.png'
+        })
+      },
+      geometries: [{ id: 'temp-marker', styleId: 'highlight', position: latLng }]
+    })
+
+    // 生成唯一关闭按钮ID，防止事件冲突
+    const closeBtnId = `custom-info-close-${Date.now()}`
+
+    // 自定义深色信息弹窗内容
+    const content = `
+  <div style="
+    background: #1f2937;
+    color: #e5e7eb;
+    border-radius: 12px;
+    padding: 12px 16px;
+    min-width: 240px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    font-size: 13px;
+    line-height: 1.5;
+    border: 1px solid #374151;
+  ">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+      <span style="font-weight: bold; font-size: 14px;">📍 轨迹点详情</span>
+      <span id="${closeBtnId}" style="cursor: pointer; font-size: 18px; line-height: 1; color: #9ca3af;">&times;</span>
+    </div>
+    <div style="margin-bottom: 6px;">🕒 时间：${formatTime(point.createTime)}</div>
+    <div style="margin-bottom: 6px;">🏠 地址：${point.address || '解析中...'}</div>
+    <div>📍 坐标：${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)}</div>
+  </div>
+`
+
+    // 创建并打开信息窗
+    infoWindow = new window.TMap.InfoWindow({
+      map,
+      position: latLng,
+      content: content,
+      offset: { x: 0, y: -35 },
+      enableCustom: true
+    })
+    infoWindow.open()
+
+    // 绑定关闭按钮事件
+    const closeBtn = document.getElementById(closeBtnId)
+    if (closeBtn) {
+      closeBtn.onclick = (e) => {
+        e.stopPropagation()
+        if (infoWindow) {
+          infoWindow.close()
+          infoWindow = null
+        }
+        clearTempMarkerAndRestoreBounds()
+      }
+    }
+
+    // 地图居中到该点
+    map.setCenter(latLng)
+  }
+
+  // ==================== 清空所有地图覆盖物 ====================
+  const clearOverlays = () => {
+    if (carMarkerLayer) carMarkerLayer.setMap(null)
+    if (markerLayer) markerLayer.setMap(null)
+    if (labelLayer) labelLayer.setMap(null)
+    if (trackLineLayer) trackLineLayer.setMap(null)
+    if (startEndMarkerLayer) startEndMarkerLayer.setMap(null)
+    if (tempMarker) tempMarker.setMap(null)
+    if (infoWindow) infoWindow.close()
+
+    // 释放引用
+    carMarkerLayer =
+      markerLayer =
+      labelLayer =
+      trackLineLayer =
+      startEndMarkerLayer =
+      tempMarker =
+      infoWindow =
+        null
+    currentTrackBounds = null
+  }
+
+  // ==================== 生命周期 ====================
+  // 页面挂载 → 初始化地图
   onMounted(() => {
     initMap()
   })
 
+  // 页面销毁 → 清理资源，防止内存泄漏
   onBeforeUnmount(() => {
     clearOverlays()
     if (map) {
@@ -692,7 +806,7 @@
   }
   .user-location .label {
     color: #9ca3af;
-    font-weight: 500;
+    font-weight: 50;
     font-size: 13px;
     white-space: nowrap;
   }
@@ -782,6 +896,7 @@
     margin-bottom: 10px;
     border: 1px solid #374151;
     transition: all 0.2s ease;
+    cursor: pointer;
   }
   .path-item:hover {
     background: #374151;
@@ -822,8 +937,8 @@
   .user-list-loading,
   .user-list-empty {
     padding: 30px 0;
-    color: #9ca3af;
     text-align: center;
+    color: #9ca3af;
     font-size: 14px;
   }
 
