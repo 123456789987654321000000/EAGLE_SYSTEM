@@ -7,109 +7,122 @@
       <div v-if="error" class="error">{{ error }}</div>
     </div>
 
-    <!-- 右侧人员列表 / 详情 -->
-    <div class="user-list">
-      <!-- 列表模式 -->
-      <div v-if="!showDetailMode" class="list-mode">
-        <div class="user-list-fixed">
-          <div class="title-row">
-            <h3 class="user-list-title">人员列表</h3>
-            <img
-              src="@/assets/images/icon/Home.png"
-              class="home-img-btn"
-              @click="goToHomePage"
-              title="返回主页"
-            />
-          </div>
-          <div class="search-date-row">
-            <el-date-picker
-              v-model="selectedDate"
-              type="date"
-              placeholder="选择日期"
-              format="YYYY-MM-DD"
-              value-format="YYYY-MM-DD"
-              class="date-picker"
-            />
-            <el-input
-              v-model="searchKeyword"
-              placeholder="搜索姓名/工号"
-              class="search-input"
-              clearable
-            />
-          </div>
-          <el-button type="primary" @click="filterUsers" style="width: 100%; margin-top: 10px"
-            >筛选</el-button
-          >
-        </div>
-        <div class="user-list-scroll">
-          <div v-if="loading" class="user-list-loading">加载中...</div>
-          <div v-else-if="filteredUserList.length === 0" class="user-list-empty">暂无人员数据</div>
-          <div
-            v-for="user in filteredUserList"
-            :key="user.usercode"
-            class="user-card"
-            :class="{ active: selectedUser === user.usercode }"
-            @click="showUserDetail(user)"
-          >
-            <div class="user-card-header">
-              <span class="user-code">
-                {{ user.username || user.usercode }}
-                <span v-if="user.username && user.usercode" class="user-code-sub"
-                  >({{ user.usercode }})</span
-                >
-              </span>
-              <span class="user-time">{{ formatTime(user.createTime) }}</span>
+    <!-- 右侧面板容器 -->
+    <div class="sidebar-container">
+      <!-- 右侧人员列表 / 详情 -->
+      <div class="user-list" :class="{ collapsed: isSidebarCollapsed }">
+        <!-- 列表模式 -->
+        <div v-if="!showDetailMode" class="list-mode">
+          <div class="user-list-fixed">
+            <div class="title-row">
+              <h3 class="user-list-title">人员列表</h3>
+              <img
+                src="@/assets/images/icon/Home.png"
+                class="home-img-btn"
+                @click="goToHomePage"
+                title="返回主页"
+              />
             </div>
-            <div class="user-card-body">
-              <div class="user-location">
-                <span class="label">当前位置</span>
-                <span class="value">{{ user.address || '获取中...' }}</span>
+            <div class="search-date-row">
+              <el-date-picker
+                v-model="selectedDate"
+                type="date"
+                placeholder="选择日期"
+                format="YYYY-MM-DD"
+                value-format="YYYY-MM-DD"
+                class="date-picker"
+              />
+              <el-input
+                v-model="searchKeyword"
+                placeholder="搜索姓名/工号"
+                class="search-input"
+                clearable
+              />
+            </div>
+            <el-button type="primary" @click="filterUsers" style="width: 100%; margin-top: 10px"
+              >筛选</el-button
+            >
+          </div>
+          <div class="user-list-scroll">
+            <div v-if="loading" class="user-list-loading">加载中...</div>
+            <div v-else-if="filteredUserList.length === 0" class="user-list-empty"
+              >暂无人员数据</div
+            >
+            <div
+              v-for="user in filteredUserList"
+              :key="user.usercode"
+              class="user-card"
+              :class="{ active: selectedUser === user.usercode }"
+              @click="showUserDetail(user)"
+            >
+              <div class="user-card-header">
+                <span class="user-code">
+                  {{ user.username || user.usercode }}
+                  <span v-if="user.username && user.usercode" class="user-code-sub"
+                    >({{ user.usercode }})</span
+                  >
+                </span>
+                <span class="user-time">{{ formatTime(user.createTime) }}</span>
               </div>
-              <div class="user-info" v-if="user.ckl || user.dsl">
-                查勘量: {{ user.ckl || '-' }} &nbsp;&nbsp;|&nbsp;&nbsp; 定损量:
-                {{ user.dsl || '-' }}
+              <div class="user-card-body">
+                <div class="user-location">
+                  <span class="label">当前位置</span>
+                  <span class="value">{{ user.address || '获取中...' }}</span>
+                </div>
+                <div class="user-info" v-if="user.ckl || user.dsl">
+                  查勘量: {{ user.ckl || '-' }} &nbsp;&nbsp;|&nbsp;&nbsp; 定损量:
+                  {{ user.dsl || '-' }}
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- 详情模式：轨迹回放 -->
-      <div v-else class="detail-mode">
-        <div class="detail-header">
-          <div class="detail-top">
-            <h2 class="detail-title">{{ currentDetailUser.username }}</h2>
-            <el-button type="default" size="small" @click="backToList">返回列表</el-button>
+        <!-- 详情模式：轨迹回放 -->
+        <div v-else class="detail-mode">
+          <div class="detail-header">
+            <div class="detail-top">
+              <h2 class="detail-title">{{ currentDetailUser.username }}</h2>
+              <el-button type="default" size="small" @click="backToList">返回列表</el-button>
+            </div>
+            <div class="detail-info-row">
+              <div
+                ><label>工号</label><span>{{ currentDetailUser.usercode }}</span></div
+              >
+              <div
+                ><label>查询日期</label><span>{{ selectedDate }}</span></div
+              >
+              <div
+                ><label>查勘量</label><span>{{ currentDetailUser.ckl || '-' }}</span></div
+              >
+              <div
+                ><label>定损量</label><span>{{ currentDetailUser.dsl || '-' }}</span></div
+              >
+            </div>
           </div>
-          <div class="detail-info-row">
+          <div class="detail-path-list">
+            <div class="path-title">轨迹经纬度记录</div>
             <div
-              ><label>工号</label><span>{{ currentDetailUser.usercode }}</span></div
+              v-for="(item, idx) in currentUserPathList"
+              :key="idx"
+              class="path-item"
+              @click="showPointOnMap(item)"
             >
-            <div
-              ><label>查询日期</label><span>{{ selectedDate }}</span></div
-            >
-            <div
-              ><label>查勘量</label><span>{{ currentDetailUser.ckl || '-' }}</span></div
-            >
-            <div
-              ><label>定损量</label><span>{{ currentDetailUser.dsl || '-' }}</span></div
-            >
+              <div class="path-time">{{ formatTime(item.createTime) }}</div>
+              <div class="path-coord">{{ item.address || '解析中...' }}</div>
+            </div>
+            <div v-if="!currentUserPathList.length" class="no-path">暂无轨迹点</div>
           </div>
-        </div>
-        <div class="detail-path-list">
-          <div class="path-title">轨迹经纬度记录</div>
-          <div
-            v-for="(item, idx) in currentUserPathList"
-            :key="idx"
-            class="path-item"
-            @click="showPointOnMap(item)"
-          >
-            <div class="path-time">{{ formatTime(item.createTime) }}</div>
-            <div class="path-coord">{{ item.address || '解析中...' }}</div>
-          </div>
-          <div v-if="!currentUserPathList.length" class="no-path">暂无轨迹点</div>
         </div>
       </div>
+    </div>
+    <!-- 固定展开按钮 -->
+    <div
+      class="float-toggle-btn"
+      @click="isSidebarCollapsed = !isSidebarCollapsed"
+      title="收起/展开面板"
+    >
+      {{ isSidebarCollapsed ? '<' : '>' }}
     </div>
   </div>
 </template>
@@ -140,6 +153,7 @@
   const loading = ref(true) // 加载状态
   const error = ref('') // 错误提示信息
   const userList = ref<any[]>([]) // 所有人员最新位置列表
+  const isSidebarCollapsed = ref(false) // 侧边栏是否折叠
   const selectedUser = ref<string>('') // 当前选中的人员工号
   const searchKeyword = ref('') // 搜索关键词
   const showDetailMode = ref(false) // 是否显示轨迹详情模式
@@ -685,10 +699,17 @@
     border-radius: 12px;
     overflow: hidden;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    width: 100%;
   }
   .map-container {
     width: 100%;
     height: 100%;
+  }
+
+  .sidebar-container {
+    position: relative;
+    height: 100%;
+    flex-shrink: 0;
   }
 
   .user-list {
@@ -702,6 +723,42 @@
     flex-direction: column;
     overflow: hidden;
     box-sizing: border-box;
+    transition: all 0.3s ease; /* 动画 */
+    flex-shrink: 0;
+  }
+  /* 收缩状态 */
+  .user-list.collapsed {
+    width: 0;
+    padding: 0;
+    border: none;
+    box-shadow: none;
+    overflow: hidden;
+    opacity: 0;
+    visibility: hidden;
+  }
+
+  .float-toggle-btn {
+    position: fixed;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 20px;
+    height: 30px;
+    background: #89929f;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px 0 0 8px;
+    cursor: pointer;
+    font-size: 20px;
+    z-index: 99999;
+    transition: 0.2s ease;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+  }
+  .float-toggle-btn:hover {
+    background: #253f78;
+    width: 30px;
   }
 
   .list-mode {
