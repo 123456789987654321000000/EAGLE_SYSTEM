@@ -243,11 +243,9 @@
       "title": "内嵌页面"
     },
     "dashboard": {
-      "title": "整体情况",
-      "console": "运营情况",
-      "personnel": "人员数据",
-      "cases": "案件分部",
-      "category": "分类管理"
+      "title": "鹰眼地图",
+      "personalmap": "实时人员分布",
+      "hotmap": "案件量热图"
     },
     "management": {
       "title": "管理驾驶舱"
@@ -256,7 +254,9 @@
       "title": "成本监控"
     },
     "efficiency": {
-      "title": "劳效监控"
+      "title": "劳效监控",
+      "personnel": "人员数据",
+      "cases": "案件情况"
     },
     "complaint": {
       "title": "咨询投诉"

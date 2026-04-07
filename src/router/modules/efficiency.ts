@@ -11,11 +11,11 @@ export const efficiencyRoutes: AppRouteRecord = {
   },
   children: [
     {
-      path: 'index',
-      name: 'EfficiencyIndex',
-      component: '/dashboard/console',
+      path: 'personnel',
+      name: 'Personnel',
+      component: '/dashboard/personnel',
       meta: {
-        title: 'menus.efficiency.title',
+        title: 'menus.efficiency.personnel',
         keepAlive: false
       }
     }

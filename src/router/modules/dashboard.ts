@@ -11,39 +11,21 @@ export const dashboardRoutes: AppRouteRecord = {
   },
   children: [
     {
-      path: 'console',
-      name: 'Console',
-      component: '/dashboard/console',
+      path: 'personalmap',
+      name: 'PersonalMap',
+      component: '/dashboard/personalmap',
       meta: {
-        title: 'menus.dashboard.console',
+        title: 'menus.dashboard.personalmap',
         keepAlive: false,
         fixedTab: true
       }
     },
     {
-      path: 'personnel',
-      name: 'Personnel',
-      component: '/dashboard/personnel',
+      path: 'hotmap',
+      name: 'HotMap',
+      component: '/dashboard/hotmap',
       meta: {
-        title: 'menus.dashboard.personnel',
-        keepAlive: false
-      }
-    },
-    {
-      path: 'cases',
-      name: 'Cases',
-      component: '/dashboard/cases',
-      meta: {
-        title: 'menus.dashboard.cases',
-        keepAlive: false
-      }
-    },
-    {
-      path: 'category',
-      name: 'Category',
-      component: '/dashboard/category',
-      meta: {
-        title: 'menus.dashboard.category',
+        title: 'menus.dashboard.hotmap',
         keepAlive: false
       }
     }
