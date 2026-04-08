@@ -223,6 +223,16 @@
         mapStyleId: 'style1'
       })
 
+      // 设置地图控件位置到左上角
+      let zoomControl = map.getControl(window.TMap.constants.DEFAULT_CONTROL_ID.ZOOM)
+      let rotationControl = map.getControl(window.TMap.constants.DEFAULT_CONTROL_ID.ROTATION)
+      if (zoomControl) {
+        zoomControl.setPosition(window.TMap.constants.CONTROL_POSITION.TOP_LEFT)
+      }
+      if (rotationControl) {
+        rotationControl.setPosition(window.TMap.constants.CONTROL_POSITION.TOP_LEFT)
+      }
+
       // 加载人员位置数据
       await fetchLatestLocations()
       loading.value = false
