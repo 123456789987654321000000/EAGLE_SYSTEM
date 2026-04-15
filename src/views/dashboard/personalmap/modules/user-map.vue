@@ -102,8 +102,16 @@
           </div>
           <div class="detail-path-list">
             <div class="path-title">轨迹经纬度记录</div>
+
+            <!-- 轨迹列表：只显示有效地址数据 -->
             <div
-              v-for="(item, idx) in currentUserPathList"
+              v-for="(item, idx) in currentUserPathList.filter(
+                (item) =>
+                  item.address &&
+                  item.address.trim() !== '' &&
+                  item.address !== '坐标无效' &&
+                  item.address !== '解析异常'
+              )"
               :key="idx"
               class="path-item"
               @click="showPointOnMap(item)"
@@ -111,7 +119,22 @@
               <div class="path-time">{{ formatTime(item.createTime) }}</div>
               <div class="path-coord">{{ item.address || '解析中...' }}</div>
             </div>
-            <div v-if="!currentUserPathList.length" class="no-path">暂无轨迹点</div>
+
+            <!-- 轨迹加载提示：修复刚进入显示暂无轨迹点问题 -->
+            <div v-if="trackLoading" class="no-path"> 轨迹解析中... </div>
+            <div
+              v-else-if="
+                currentUserPathList.filter(
+                  (item) =>
+                    item.address &&
+                    item.address.trim() !== '' &&
+                    item.address !== '坐标无效' &&
+                    item.address !== '解析异常'
+                ).length === 0
+              "
+              class="no-path"
+              >暂无轨迹点
+            </div>
           </div>
         </div>
       </div>
@@ -159,6 +182,7 @@
   const showDetailMode = ref(false) // 是否显示轨迹详情模式
   const currentDetailUser = ref<any>(null) // 当前查看详情的用户
   const currentUserPathList = ref<any[]>([]) // 当前用户的轨迹点列表
+  const trackLoading = ref(false) // 轨迹地址解析加载状态
 
   // ==================== 日期处理 ====================
   const today = new Date()
@@ -178,7 +202,7 @@
     if (!searchKeyword.value) return userList.value
     const kw = searchKeyword.value.toLowerCase()
     return userList.value.filter((u) => {
-      const name = (u.username || '').toLowerCase()
+      const name = (u || '').toLowerCase()
       const code = (u.usercode || '').toLowerCase()
       return name.includes(kw) || code.includes(kw)
     })
@@ -361,8 +385,10 @@
   // ==================== 加载单个用户全天轨迹 ====================
   const loadUserTrack = async (usercode: string) => {
     try {
+      trackLoading.value = true // 开启轨迹加载状态
       if (!map) {
         error.value = '地图未初始化'
+        trackLoading.value = false
         return
       }
       clearOverlays()
@@ -377,6 +403,7 @@
       if (!data || data.length === 0) {
         error.value = '该用户当日无轨迹数据'
         currentUserPathList.value = []
+        trackLoading.value = false
         return
       }
 
@@ -393,6 +420,7 @@
       const path = sorted.map((p) => new window.TMap.LatLng(p.latitude, p.longitude))
       if (path.length < 2) {
         error.value = '轨迹点不足，无法回放'
+        trackLoading.value = false
         return
       }
 
@@ -463,10 +491,16 @@
         startPlayback(path)
       }, 200)
 
+      // 地址解析延迟后关闭加载状态
+      setTimeout(() => {
+        trackLoading.value = false
+      }, 2000)
+
       error.value = ''
     } catch (err: any) {
       console.error('获取轨迹失败:', err)
       error.value = `获取轨迹失败: ${err.message}`
+      trackLoading.value = false
     }
   }
 
@@ -484,7 +518,7 @@
 
     try {
       // 车辆沿路径移动
-      carMarkerLayer.moveAlong({ car: { path, speed: 200 } }, { autoRotation: true })
+      carMarkerLayer.moveAlong({ car: { path, speed: 500 } }, { autoRotation: true })
       // 移动时擦除已走过的轨迹
       carMarkerLayer.on('moving', (e: any) => {
         const passed = e.car?.passedLatLngs
@@ -792,7 +826,7 @@
   }
   .user-list-title {
     font-size: 18px;
-    font-weight: 600;
+    font-weight: 60;
     color: #f3f4f6;
     margin: 0;
     letter-spacing: 0.5px;
